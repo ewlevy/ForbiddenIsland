@@ -1,0 +1,426 @@
+import java.util.ArrayList;
+import java.util.Random;
+import tester.*;
+import javalib.impworld.*;
+import java.awt.Color;
+import javalib.worldimages.*;
+
+//Represents a single square of the game area
+class Cell {
+
+    // Color, position, and height of the cell
+    double height;
+    Color cellColor;
+    Posn pos;
+
+    // Init the whole cell
+    Cell(double height, int x, int y) {
+        this.height = height;
+        this.pos = new Posn(x, y);
+
+        // Sets the cell's color, assuming height up to 32
+        int rB = (int) (height * (180 / 32) + 75);
+        int gR = (int) (height * (100 / 32) + 155);
+        this.cellColor = new Color(rB, gR, rB);
+    }
+
+    // Cell constructor with only two arguments
+    Cell(int x, int y) {
+        this.pos = new Posn(x, y);
+    }
+
+    // the four adjacent cells to this one
+    Cell left, top, right, bottom;
+
+    // reports whether this cell is flooded or not
+    boolean isFlooded;
+
+    // Fixes this cell to include its neighbors
+    public void cellLink(Cell neighbor, String dir) {
+        if (dir.equals("right")) {
+            this.right = neighbor;
+        } else if (dir.equals("left")) {
+            this.left = neighbor;
+        } else if (dir.equals("up")) {
+            this.top = neighbor;
+        } else if (dir.equals("down")) {
+            this.bottom = neighbor;
+        }
+    }
+
+    // Adds this image to the world image at its coordinates
+    public WorldImage addCell() {
+        return new RectangleImage(6, 6, OutlineMode.SOLID, this.cellColor);
+    }
+
+    // Returns this cell's location
+    public Posn getPosn() {
+        return this.pos;
+    }
+
+    // Changes the color of this tile, as the water rises
+    public void waterRising() {
+
+    }
+
+}
+
+// A cell with a height of 0 of less
+class OceanCell extends Cell {
+
+    // Similar constructor to a cell, color is blue by default
+    OceanCell(int x, int y) {
+        super(x, y);
+        this.cellColor = new Color(0, 0, 128);
+    }
+}
+
+// The game's class
+class ForbiddenIslandWorld extends World {
+
+    // All the cells of the game, including the ocean
+    IList<Cell> board;
+    int tickCount;
+
+    // When the game is created, makes all the Cells
+    ForbiddenIslandWorld(IHeightGeneration h) {
+
+        this.tickCount = 1;
+
+        // Makes a list of cells based on game type
+        ArrayList<ArrayList<Double>> height = h.heightListGen();
+
+        // Creates a Cell list from the heights
+        ArrayList<ArrayList<Cell>> cells = new ArrayList<ArrayList<Cell>>();
+        for (int i = 0; i <= ISLAND_SIZE; i++) {
+            cells.add(i, new ArrayList<Cell>());
+            for (int j = 0; j <= ISLAND_SIZE; j++) {
+
+                // Makes a land cell if its height is greater than 0
+                double newCellHeight = height.get(i).get(j);
+                if (newCellHeight > 0.5) {
+                    cells.get(i).add(j, new Cell(newCellHeight, i, j));
+                } else {
+                    cells.get(i).add(j, new OceanCell(i, j));
+                }
+
+                // Calls function for initializing this cell's neighbors
+                Utils u = new Utils();
+                cells = u.cellNeighbors(cells, i, j);
+            }
+        }
+
+        // Gathers the cells into an IList
+        IList<Cell> cellList = new MtList<Cell>();
+        for (int i = 0; i <= ISLAND_SIZE; i++) {
+            for (int j = 0; j <= ISLAND_SIZE; j++) {
+                cellList = new ConsList<Cell>(cells.get(i).get(j),
+                        cellList);
+            }
+        }
+        this.board = cellList;
+    }
+
+    // Defines an int constant
+    static final int ISLAND_SIZE = 64;
+
+    // the current height of the ocean
+    int waterHeight;
+
+    // Make the world
+    public WorldScene makeScene() {
+        WorldScene fullWorld = getEmptyScene();
+
+        // Goes through the whole list, adding each to the world
+        for (int i = 0; i <= ISLAND_SIZE * ISLAND_SIZE
+                + ISLAND_SIZE * 2; i++) {
+            Cell currCell = this.board.get(i);
+            WorldImage currImg = currCell.addCell();
+            Posn currPosn = currCell.getPosn();
+            fullWorld.placeImageXY(currImg, currPosn.x * 6 + 3,
+                    currPosn.y * 6 + 3);
+        }
+        return fullWorld;
+    }
+
+    // Every ten ticks, more of the tiles flood and tiles near flooding flood
+    public void onTick() {
+        this.tickCount++;
+        // Floods more of the tiles if this hits 10 and resets
+        if (this.tickCount == 10) {
+            this.board.raiseWater();
+            this.tickCount = 1;
+        }
+    }
+}
+
+// Interface for all types of map height generation
+interface IHeightGeneration {
+
+    ArrayList<ArrayList<Double>> heightListGen();
+
+    // Distance determination
+    default double manhattanDistanceCheck(int x, int y) {
+        double center = ForbiddenIslandWorld.ISLAND_SIZE / 2;
+        double xDist = Math.abs(x - center);
+        double yDist = Math.abs(y - center);
+        return (xDist + yDist);
+    }
+
+}
+
+// Standard height as Manhattan distance generator
+class ManhattanDistance implements IHeightGeneration {
+
+    public ArrayList<ArrayList<Double>> heightListGen() {
+
+        // New utility class for the distance check
+        ArrayList<ArrayList<Double>> allCells = new ArrayList<ArrayList<Double>>();
+
+        // Creates a new Array or Array for heights based on Manhattan distance
+        for (int i = 0; i <= ForbiddenIslandWorld.ISLAND_SIZE; i++) {
+            allCells.add(i, new ArrayList<Double>());
+            for (int j = 0; j <= ForbiddenIslandWorld.ISLAND_SIZE; j++) {
+
+                // Distance from center determination
+                double distToCenter = this.manhattanDistanceCheck(i, j);
+                if (distToCenter < 32) {
+                    allCells.get(i).add(j, (32 - distToCenter));
+                } else {
+                    allCells.get(i).add(j, 0.0);
+                }
+            }
+        }
+        return allCells;
+    }
+}
+
+// Random diamond game generator
+class RandomDiamond implements IHeightGeneration {
+
+    public ArrayList<ArrayList<Double>> heightListGen() {
+
+        // New utility class for the distance check
+        ArrayList<ArrayList<Double>> allCells = new ArrayList<ArrayList<Double>>();
+        Random rand = new Random();
+
+        // Creates a new Array of Array for randomly generated heights
+        for (int i = 0; i <= ForbiddenIslandWorld.ISLAND_SIZE; i++) {
+            allCells.add(i, new ArrayList<Double>());
+            for (int j = 0; j <= ForbiddenIslandWorld.ISLAND_SIZE; j++) {
+                if (this.manhattanDistanceCheck(i, j) < 32) {
+                    double value = rand.nextInt(32) + 1;
+                    allCells.get(i).add(j, value);
+                } else {
+                    allCells.get(i).add(j, 0.0);
+                }
+            }
+        }
+        return allCells;
+    }
+}
+
+class RandomTerrain implements IHeightGeneration {
+
+    public ArrayList<ArrayList<Double>> heightListGen() {
+
+        // New utility class to collect the cell heights
+        ArrayList<ArrayList<Double>> allCells = new ArrayList<ArrayList<Double>>();
+
+        // Creates a new Array of Array for randomly generated but related
+        // heights
+        for (int i = 0; i <= ForbiddenIslandWorld.ISLAND_SIZE + 1; i++) {
+            allCells.add(i, new ArrayList<Double>());
+            for (int j = 0; j <= ForbiddenIslandWorld.ISLAND_SIZE
+                    + 1; j++) {
+                allCells.get(i).add(j, 0.0);
+            }
+        }
+        // set the center to be maximum height
+        allCells.get(ForbiddenIslandWorld.ISLAND_SIZE / 2).set(
+                ForbiddenIslandWorld.ISLAND_SIZE / 2,
+                (double) ForbiddenIslandWorld.ISLAND_SIZE / 2);
+        // set the middle of the left edge to be 1
+        allCells.get(0).set(ForbiddenIslandWorld.ISLAND_SIZE / 2, 1.0);
+        // set the middle of the right edge to be 1
+        allCells.get(ForbiddenIslandWorld.ISLAND_SIZE)
+                .set(ForbiddenIslandWorld.ISLAND_SIZE / 2, 1.0);
+        // set the middle of the top edge to be 1
+        allCells.get(ForbiddenIslandWorld.ISLAND_SIZE / 2)
+                .set(ForbiddenIslandWorld.ISLAND_SIZE, 1.0);
+        // set the middle of the bottom edge to be 1
+        allCells.get(ForbiddenIslandWorld.ISLAND_SIZE / 2).set(0, 1.0);
+        this.randomGenHelp(0, 0, ForbiddenIslandWorld.ISLAND_SIZE + 1,
+                ForbiddenIslandWorld.ISLAND_SIZE + 1, allCells);
+        return allCells;
+    }
+
+    // recurs through the whole game to generate random but related terrain
+    void randomGenHelp(int tlx, int tly, int brx, int bry,
+            ArrayList<ArrayList<Double>> arr) {
+        if (brx - tlx < 2) {
+            return;
+        } else {
+            // y middle
+            int ym = (tly + bry) / 2;
+            // x middle
+            int xm = (tlx + brx) / 2;
+
+            // values of corners
+            // get tl value
+            double tlval = arr.get(tlx).get(tly);
+            // get tr value
+            double trval = arr.get(tlx).get(bry);
+            // get bl value
+            double blval = arr.get(brx).get(tly);
+            // get br value
+            double brval = arr.get(brx).get(bry);
+
+            Random rand = new Random();
+
+//            // random but related values
+//            // generate l value
+//            double lval = rand.nextInt(16) + (tlval + blval) / 2;
+//            // generate t value
+//            double tval = rand.nextInt(16) + (tlval + trval) / 2;
+//            // generate b value
+//            double bval = rand.nextInt(16) + (brval + blval) / 2;
+//            // generate r value
+//            double rval = rand.nextInt(16) + (trval + brval) / 2;
+//            // generate middle value
+//            double mval = rand.nextInt(16)
+//                    + (trval + tlval + brval + blval) / 4;
+            
+            // random but related values
+            // generate l value
+            double lval = (rand.nextInt(2*(brx-tlx))) + (tlval + blval) / 2;
+            // generate t value
+            double tval = (rand.nextInt(brx-tlx)) + (tlval + trval) / 2;
+            // generate b value
+            double bval = (rand.nextInt(brx-tlx)) + (brval + blval) / 2;
+            // generate r value
+            double rval = (rand.nextInt(brx-tlx)) + (trval + brval) / 2;
+            // generate middle value
+            double mval = (rand.nextInt(brx-tlx))
+                    + (trval + tlval + brval + blval) / 4;
+
+            // set the appropriate positions to the randomly generated values
+            // set the left to the generated value
+            arr.get(tlx).set(ym, lval);
+            // set the top to the generated value
+            arr.get(xm).set(tly, tval);
+            // set the bottom to the generated value
+            arr.get(xm).set(bry, bval);
+            // set the right to the generated value
+            arr.get(brx).set(ym, rval);
+            // set the middle to the generated value
+            arr.get(xm).set(ym, mval);
+
+            // recur in the 4 remaining quadrants
+            // top left quadrant
+            randomGenHelp(tlx, tly, xm, ym, arr);
+            // top right quadrant
+            randomGenHelp(xm, tly, brx, ym, arr);
+            // bottom left quadrant
+            randomGenHelp(tlx, ym, xm, bry, arr);
+            // bottom right quadrant
+            randomGenHelp(xm, ym, brx, bry, arr);
+        }
+    }
+}
+
+// IList
+interface IList<T> {
+
+    T get(int index);
+
+    void raiseWater();
+
+}
+
+// A filled list
+class ConsList<T> implements IList<T> {
+    T first;
+    IList<T> rest;
+
+    // Initialize the list
+    ConsList(T first, IList<T> rest) {
+        this.first = first;
+        this.rest = rest;
+    }
+
+    // Get function by index
+    public T get(int index) {
+        if (index == 0) {
+            return this.first;
+        } else {
+            return this.rest.get(index - 1);
+        }
+    }
+
+    // Updates each tile to increment the water level
+    public void raiseWater() {
+        // this.first.waterRising();
+        this.rest.raiseWater();
+    }
+}
+
+// An empty list
+class MtList<T> implements IList<T> {
+
+    // Shouldn't be called
+    public T get(int index) {
+        throw new RuntimeException("Index out of bounds on get");
+    }
+
+    // Ends the loop
+    public void raiseWater() {
+        return;
+    }
+}
+
+// Utility Functions for the game
+class Utils {
+
+    // Updates this cell and its neighbors by mutation
+    public ArrayList<ArrayList<Cell>> cellNeighbors(
+            ArrayList<ArrayList<Cell>> arr, int x, int y) {
+
+        // If along one of the edges, sets the cells neighbors to self
+        int farEdge = ForbiddenIslandWorld.ISLAND_SIZE;
+
+        // Handles cells along the left or right
+        if (x == 0) {
+            arr.get(x).get(y).cellLink(arr.get(x).get(y), "left");
+        } else if (x == farEdge) {
+            arr.get(x).get(y).cellLink(arr.get(x).get(y), "right");
+        } else {
+            arr.get(x - 1).get(y).cellLink(arr.get(x).get(y), "right");
+            arr.get(x).get(y).cellLink(arr.get(x - 1).get(y), "left");
+        }
+
+        // Handles cells along the top or bottom
+        if (y == 0) {
+            arr.get(x).get(y).cellLink(arr.get(x).get(y), "up");
+        } else if (y == farEdge) {
+            arr.get(x).get(y).cellLink(arr.get(x).get(y), "down");
+        } else {
+            arr.get(x).get(y).cellLink(arr.get(x).get(y - 1), "up");
+            arr.get(x).get(y - 1).cellLink(arr.get(x).get(y), "down");
+        }
+        return arr;
+    }
+
+}
+
+// The game itself
+class ExamplesForbiddenIsland {
+
+    void testGame(Tester t) {
+        ForbiddenIslandWorld g = new ForbiddenIslandWorld(
+                new RandomTerrain());
+        g.bigBang(6 * ForbiddenIslandWorld.ISLAND_SIZE + 6,
+                6 * ForbiddenIslandWorld.ISLAND_SIZE + 6);
+    }
+
+}
